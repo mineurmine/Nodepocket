@@ -1,0 +1,62 @@
+# Compile l'APK de Node Pocket à chaque envoi de fichier sur le dépôt.
+# L'APK apparaît dans l'onglet "Releases" du dépôt (et dans "Actions" > dernier run > Artifacts).
+name: Compiler l'APK Node Pocket
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trouver le projet (zip ou dossier)
+        run: |
+          ZIP=$(ls NodePocket*.zip 2>/dev/null | sort | tail -n 1 || true)
+          if [ -z "$ZIP" ]; then ZIP=$(ls *.zip 2>/dev/null | head -n 1 || true); fi
+          if [ -n "$ZIP" ]; then
+            echo "Projet trouvé dans $ZIP"
+            rm -rf _src && mkdir _src && unzip -q "$ZIP" -d _src
+            DIR=$(dirname "$(find _src -name settings.gradle.kts | head -n 1)")
+          else
+            DIR=.
+          fi
+          if [ ! -f "$DIR/settings.gradle.kts" ]; then
+            echo "::error::Projet introuvable : envoie le fichier NodePocket-source.zip à la racine du dépôt."
+            exit 1
+          fi
+          echo "PROJ=$DIR" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Compiler
+        working-directory: ${{ env.PROJ }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+
+      - name: Renommer l'APK
+        run: |
+          mkdir -p out
+          cp "$PROJ/app/build/outputs/apk/release/app-release.apk" "out/NodePocket-v1.0.${{ github.run_number }}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NodePocket-apk
+          path: out/*.apk
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nodepocket-${{ github.run_number }}
+          name: Node Pocket v1.0.${{ github.run_number }}
+          body: APK compilé automatiquement. Télécharge le fichier .apk ci-dessous depuis la console ou le téléphone.
+          files: out/*.apk
+          make_latest: true
